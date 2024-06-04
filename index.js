@@ -84,17 +84,17 @@ async function run() {
 
     app.delete('/users/:id', async (req, res) => {
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) }
+      const query = { _id: new ObjectI(id) };
       const result = await userCollection.deleteOne(query);
-      const task = await taskCollection.findOne(query)
-      const { task_quantity, payable_amount , creator_email} = task;
+      const task = await taskCollection.findOne(query);
+      const { task_quantity, payable_amount, creator_email } = task;
       const totalCost = task_quantity * payable_amount;
       const user = await userCollection.findOne({ email: creator_email });
       const updatedCoin = parseInt(user.coin) + totalCost;
-      userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
-      console.log(task , user , updatedCoin)
+      await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
+      console.log(task, user, updatedCoin);
       res.send(result);
-    })
+    });
     app.patch('/users/:id', async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) }
@@ -120,7 +120,7 @@ async function run() {
     // Task related api
     app.post('/tasks', async (req, res) => {
       const newTask = req.body
-      const { task_quantity, payable_amount , creator_email} = newTask;
+      const { task_quantity, payable_amount, creator_email } = newTask;
       const totalCost = task_quantity * payable_amount;
       const user = await userCollection.findOne({ email: creator_email });
       const updatedCoin = parseInt(user.coin) - totalCost;
