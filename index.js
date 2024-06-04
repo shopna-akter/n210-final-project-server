@@ -28,14 +28,14 @@ const logger = (req, res, next) => {
 const verifyToken = (req, res, next) => {
   const token = req?.cookies?.token
   if (!token) {
-      return res.status(401).send({ message: 'Unauthorized access' })
+    return res.status(401).send({ message: 'Unauthorized access' })
   }
   jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-      if (err) {
-          return res.status(401).send({ message: 'Unauthorized access' })
-      }
-      req.user = decoded
-      next()
+    if (err) {
+      return res.status(401).send({ message: 'Unauthorized access' })
+    }
+    req.user = decoded
+    next()
   })
   // next()
 }
@@ -50,58 +50,108 @@ async function run() {
 
     const userCollection = client.db("PicoWorkersDB").collection('users')
     const reviewCollection = client.db("PicoWorkersDB").collection('Reviews')
+    const taskCollection = client.db("PicoWorkersDB").collection('Tasks')
     // auth related api 
     app.post('/jwt', async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' })
       res
-          .cookie('token', token, cookieOption)
-          .send({ success: true });
-  })
-  app.post('/logout', (req, res) => {
+        .cookie('token', token, cookieOption)
+        .send({ success: true });
+    })
+    app.post('/logout', (req, res) => {
       const user = req.body
-      res.clearCookie('token', { ...cookieOption , maxAge: 0 })
-      .send({ success: true })
-  })
+      res.clearCookie('token', { ...cookieOption, maxAge: 0 })
+        .send({ success: true })
+    })
 
     // User Related Operation
-    app.post('/users', async(req , res)=>{
-        const user = req.body
-        const query = {email: user.email}
-        const existingUser = await userCollection.findOne(query)
-        if (existingUser) {
-          console.log(existingUser);
-          return res.send({message: 'user alredy exist' , insertedId: null})
-        }
-        const result = await userCollection.insertOne(user)
-        res.send(result)
+    app.post('/users', async (req, res) => {
+      const user = req.body
+      const query = { email: user.email }
+      const existingUser = await userCollection.findOne(query)
+      if (existingUser) {
+        console.log(existingUser);
+        return res.send({ message: 'user alredy exist', insertedId: null })
+      }
+      const result = await userCollection.insertOne(user)
+      res.send(result)
     })
-    app.get('/users', async(req,res)=>{ 
+    app.get('/users', async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result)
     })
+
     app.delete('/users/:id', async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) }
       const result = await userCollection.deleteOne(query);
+      const task = await taskCollection.findOne(query)
+      const { task_quantity, payable_amount , creator_email} = task;
+      const totalCost = task_quantity * payable_amount;
+      const user = await userCollection.findOne({ email: creator_email });
+      const updatedCoin = parseInt(user.coin) + totalCost;
+      userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
+      console.log(task , user , updatedCoin)
       res.send(result);
     })
-    app.patch('/users/admin/:id' , async(req , res)=>{
+    app.patch('/users/:id', async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) }
       const updatedDoc = {
         $set: {
-          Role: 'admin'
+          role: 'admin',
         }
       }
-      const result = await userCollection.updateOne(filter , updatedDoc);
+      const result = await userCollection.updateOne(filter, updatedDoc);
       res.send(result);
     })
+    app.get('/featuredUsers', async (req, res) => {
+      const result = await userCollection
+        .find({ role: 'Worker' }).sort({ coin: -1 }).limit(6).toArray();
+      res.json(result);
+      res.json(result);
+    });
     // Data related api
-    app.get('/reviews' , async(req,res)=>{
+    app.get('/reviews', async (req, res) => {
       const result = await reviewCollection.find().toArray();
       res.send(result)
     })
+    // Task related api
+    app.post('/tasks', async (req, res) => {
+      const newTask = req.body
+      const { task_quantity, payable_amount , creator_email} = newTask;
+      const totalCost = task_quantity * payable_amount;
+      const user = await userCollection.findOne({ email: creator_email });
+      const updatedCoin = parseInt(user.coin) - totalCost;
+      await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
+      const result = await taskCollection.insertOne(newTask)
+      res.send(result)
+    })
+    app.get('/tasks', async (req, res) => {
+      const result = await taskCollection.find().toArray();
+      res.send(result)
+    })
+    app.put('/tasks/:id', async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updatedTask = req.body
+      const Task = {
+        $set: {
+          task_title: updatedTask.task_title,
+          task_detail: updatedTask.task_detail,
+          submission_info: updatedTask.submission_info,
+        }
+      }
+      const result = await taskCollection.updateOne(filter, Task);
+      res.send(result);
+    });
+    app.delete('/tasks/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await taskCollection.deleteOne(query);
+      res.send(result)
+    });
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
@@ -112,8 +162,8 @@ async function run() {
 run().catch(console.dir);
 
 app.get('/', (req, res) => {
-    res.send('PicoWorker server is running to give job')
+  res.send('PicoWorker server is running to give job')
 })
 app.listen(port, () => {
-    console.log(`PicoWorker is running on port ${port}`);
+  console.log(`PicoWorker is running on port ${port}`);
 })
