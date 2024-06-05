@@ -84,15 +84,8 @@ async function run() {
 
     app.delete('/users/:id', async (req, res) => {
       const id = req.params.id;
-      const query = { _id: new ObjectI(id) };
+      const query = { _id: new ObjectId(id) };
       const result = await userCollection.deleteOne(query);
-      const task = await taskCollection.findOne(query);
-      const { task_quantity, payable_amount, creator_email } = task;
-      const totalCost = task_quantity * payable_amount;
-      const user = await userCollection.findOne({ email: creator_email });
-      const updatedCoin = parseInt(user.coin) + totalCost;
-      await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
-      console.log(task, user, updatedCoin);
       res.send(result);
     });
     app.patch('/users/:id', async (req, res) => {
@@ -132,6 +125,26 @@ async function run() {
       const result = await taskCollection.find().toArray();
       res.send(result)
     })
+    app.get('/availableTasks', async (req, res) => {
+      const result = await taskCollection.aggregate([
+        {
+          $addFields: {
+            task_quantity_int: { $toInt: "$task_quantity" }
+          }
+        },
+        {
+          $match: {
+            task_quantity_int: { $gt: 0 }
+          }
+        },
+        {
+          $project: {
+            task_quantity_int: 0
+          }
+        }
+      ]).toArray();
+      res.send(result);
+    });
     app.put('/tasks/:id', async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
@@ -149,9 +162,19 @@ async function run() {
     app.delete('/tasks/:id', async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
-      const result = await taskCollection.deleteOne(query);
-      res.send(result)
-    });
+      const task = await taskCollection.findOne(query);
+      if (task) {
+        const { task_quantity, payable_amount, creator_email } = task;
+        const totalCost = task_quantity * payable_amount;
+        const user = await userCollection.findOne({ email: creator_email });
+        if (user) {
+          const updatedCoin = parseInt(user.coin) + totalCost;
+          await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
+        }
+        const result = await taskCollection.deleteOne(query);
+        res.send(result)
+      }
+    })
     await client.db("admin").command({ ping: 1 });
     console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
