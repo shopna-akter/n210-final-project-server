@@ -75,7 +75,7 @@ async function run() {
       const query = { email: user.email }
       const existingUser = await userCollection.findOne(query)
       if (existingUser) {
-        console.log(existingUser);
+        // console.log(existingUser);
         return res.send({ message: 'user alredy exist', insertedId: null })
       }
       const result = await userCollection.insertOne(user)
@@ -104,27 +104,16 @@ async function run() {
       res.send(result);
     })
     app.get('/featuredUsers', async (req, res) => {
-      const result = await userCollection
-        .find({ role: 'Worker' }).sort({ coin: -1 }).limit(6).toArray();
-      res.json(result);
+      const result = await userCollection.find({ role: 'Worker' }).sort({ coin: -1 }).limit(6).toArray();
       res.json(result);
     });
     // Data related api
+    // review related api
     app.get('/reviews', async (req, res) => {
       const result = await reviewCollection.find().toArray();
       res.send(result)
     })
-    // Task related api
-    app.post('/tasks', async (req, res) => {
-      const newTask = req.body
-      const { task_quantity, payable_amount, creator_email } = newTask;
-      const totalCost = task_quantity * payable_amount;
-      const user = await userCollection.findOne({ email: creator_email });
-      const updatedCoin = parseInt(user.coin) - totalCost;
-      await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
-      const result = await taskCollection.insertOne(newTask)
-      res.send(result)
-    })
+    // submission related api
     app.post('/submission', async (req, res) => {
       const submitedTask = req.body
       const result = await submissionCollection.insertOne(submitedTask)
@@ -134,14 +123,20 @@ async function run() {
       const result = await submissionCollection.find().toArray();
       res.send(result)
     })
+    app.delete('/submission/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await submissionCollection.deleteOne(query);
+      res.send(result);
+    });
     app.get('/submission', async (req, res) => {
-      let query = {status: 'pending'};
+      let query = { status: 'pending' };
       if (req.query?.email) {
         query = { worker_email: req.query.email }
-        console.log(query);
+        // console.log(query);
       }
       const result = await submissionCollection.find(query).toArray()
-      console.log(result);
+      // console.log(result);
       res.send(result)
     })
     app.get('/approvedSubmission', async (req, res) => {
@@ -149,9 +144,35 @@ async function run() {
       if (req.query?.email) {
         query.worker_email = req.query.email
       }
-      console.log(query);
+      // console.log(query);
       const result = await submissionCollection.find(query).toArray()
-      console.log(result);
+      // console.log(result);
+      res.send(result)
+    })
+    app.put('/submission/:id', async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updatedSubmission = req.body
+      const user = await userCollection.findOne({ email: updatedSubmission.workerEmail })
+      const newCoinBalance = user.coin + updatedSubmission.payable_amount
+      await userCollection.updateOne({ email: updatedSubmission.workerEmail }, { $set: { coin: newCoinBalance } });
+      const updatedDoc = {
+        $set: {
+          status: updatedSubmission.status
+        }
+      }
+      const result = await taskCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
+    // Task related api
+    app.post('/tasks', async (req, res) => {
+      const newTask = req.body
+      const { task_quantity, payable_amount, creator_email } = newTask;
+      const totalCost = task_quantity * payable_amount;
+      const user = await userCollection.findOne({ email: creator_email });
+      const updatedCoin = parseInt(user.coin) - totalCost;
+      await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
+      const result = await taskCollection.insertOne(newTask)
       res.send(result)
     })
     app.get('/tasks', async (req, res) => {
