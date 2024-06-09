@@ -7,7 +7,10 @@ require('dotenv').config()
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port = process.env.PORT || 5000;
 
-app.use(cors())
+app.use(cors({
+  origin: 'http://localhost:5173',
+  credentials: true,
+}));
 app.use(express.json())
 app.use(cookieparser())
 
@@ -51,6 +54,7 @@ async function run() {
     const userCollection = client.db("PicoWorkersDB").collection('users')
     const reviewCollection = client.db("PicoWorkersDB").collection('Reviews')
     const taskCollection = client.db("PicoWorkersDB").collection('Tasks')
+    const submissionCollection = client.db("PicoWorkersDB").collection('Submission')
     // auth related api 
     app.post('/jwt', async (req, res) => {
       const user = req.body;
@@ -119,6 +123,35 @@ async function run() {
       const updatedCoin = parseInt(user.coin) - totalCost;
       await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
       const result = await taskCollection.insertOne(newTask)
+      res.send(result)
+    })
+    app.post('/submission', async (req, res) => {
+      const submitedTask = req.body
+      const result = await submissionCollection.insertOne(submitedTask)
+      res.send(result)
+    })
+    app.get('/submissions', async (req, res) => {
+      const result = await submissionCollection.find().toArray();
+      res.send(result)
+    })
+    app.get('/submission', async (req, res) => {
+      let query = {status: 'pending'};
+      if (req.query?.email) {
+        query = { worker_email: req.query.email }
+        console.log(query);
+      }
+      const result = await submissionCollection.find(query).toArray()
+      console.log(result);
+      res.send(result)
+    })
+    app.get('/approvedSubmission', async (req, res) => {
+      let query = { status: 'approved' };
+      if (req.query?.email) {
+        query.worker_email = req.query.email
+      }
+      console.log(query);
+      const result = await submissionCollection.find(query).toArray()
+      console.log(result);
       res.send(result)
     })
     app.get('/tasks', async (req, res) => {
