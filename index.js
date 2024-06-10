@@ -55,6 +55,7 @@ async function run() {
     const reviewCollection = client.db("PicoWorkersDB").collection('Reviews')
     const taskCollection = client.db("PicoWorkersDB").collection('Tasks')
     const submissionCollection = client.db("PicoWorkersDB").collection('Submission')
+    const PaymentCollection = client.db("PicoWorkersDB").collection('Payment')
     // auth related api 
     app.post('/jwt', async (req, res) => {
       const user = req.body;
@@ -85,7 +86,10 @@ async function run() {
       const result = await userCollection.find().toArray();
       res.send(result)
     })
-
+    app.get('/users/workers', async (req, res) => {
+      const workers = await userCollection.find({ role: 'Worker' }).toArray();
+      res.send(workers);
+    });
     app.delete('/users/:id', async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
@@ -94,19 +98,47 @@ async function run() {
     });
     app.patch('/users/:id', async (req, res) => {
       const id = req.params.id;
-      const filter = { _id: new ObjectId(id) }
+      const { role } = req.body;
+
+      const filter = { _id: new ObjectId(id) };
       const updatedDoc = {
         $set: {
-          role: 'admin',
+          role: role,
         }
-      }
+      };
+
       const result = await userCollection.updateOne(filter, updatedDoc);
       res.send(result);
-    })
+    });
     app.get('/featuredUsers', async (req, res) => {
       const result = await userCollection.find({ role: 'Worker' }).sort({ coin: -1 }).limit(6).toArray();
       res.json(result);
     });
+    // Payment related api 
+    app.post('/purchase-coins/:coins', async (req, res) => {
+      const { coins } = req.params;
+      const userInfo = req.body;
+      const Id = userInfo.userId
+      const userId = {_id: new ObjectId(Id)}
+      const payment_method = userInfo.payment_method
+      const paymentInfo = {
+        coins,
+        paymentDate: new Date(),
+        payment_method,
+        Id
+      };
+      const user = await userCollection.findOne(userId)
+      if (userId) {
+        const updatedCoin = user.coin + parseInt(coins)
+        await userCollection.updateOne({ email: user.email }, { $set: { coin: updatedCoin } });
+      }
+      const result = await PaymentCollection.insertOne(paymentInfo);
+      res.send(result);
+    });
+    app.get('/payment' , async(req ,res)=>{
+      const result = await PaymentCollection.find().toArray();
+      res.send(result)
+    })
     // Data related api
     // review related api
     app.get('/reviews', async (req, res) => {
@@ -153,15 +185,16 @@ async function run() {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
       const updatedSubmission = req.body
-      const user = await userCollection.findOne({ email: updatedSubmission.workerEmail })
-      const newCoinBalance = user.coin + updatedSubmission.payable_amount
-      await userCollection.updateOne({ email: updatedSubmission.workerEmail }, { $set: { coin: newCoinBalance } });
-      const updatedDoc = {
+      const user = await userCollection.findOne({ email: updatedSubmission.worker_email })
+      const newCoinBalance = user.coin + parseInt(updatedSubmission.payable_amount)
+      await userCollection.updateOne({ email: updatedSubmission.worker_email }, { $set: { coin: newCoinBalance } });
+      const newSubmission = {
         $set: {
-          status: updatedSubmission.status
+          status: 'approved'
         }
       }
-      const result = await taskCollection.updateOne(filter, updatedDoc);
+      console.log(filter, updatedSubmission, user, updatedSubmission.worker_email, newCoinBalance, newSubmission);
+      const result = await submissionCollection.updateOne(filter, newSubmission);
       res.send(result);
     });
     // Task related api
@@ -217,14 +250,21 @@ async function run() {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const task = await taskCollection.findOne(query);
-      if (task) {
-        const { task_quantity, payable_amount, creator_email } = task;
-        const totalCost = task_quantity * payable_amount;
-        const user = await userCollection.findOne({ email: creator_email });
-        if (user) {
-          const updatedCoin = parseInt(user.coin) + totalCost;
-          await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
+      const isAdmin = req.body
+      if (!isAdmin) {
+        if (task) {
+          const { task_quantity, payable_amount, creator_email } = task;
+          const totalCost = task_quantity * payable_amount;
+          const user = await userCollection.findOne({ email: creator_email });
+          if (user) {
+            const updatedCoin = parseInt(user.coin) + totalCost;
+            await userCollection.updateOne({ email: creator_email }, { $set: { coin: updatedCoin } });
+          }
+          const result = await taskCollection.deleteOne(query);
+          res.send(result)
         }
+      }
+      else {
         const result = await taskCollection.deleteOne(query);
         res.send(result)
       }
