@@ -28,20 +28,7 @@ const logger = (req, res, next) => {
   console.log('log: info', req.method, req.url);
   next()
 }
-const verifyToken = (req, res, next) => {
-  const token = req?.cookies?.token
-  if (!token) {
-    return res.status(401).send({ message: 'Unauthorized access' })
-  }
-  jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-    if (err) {
-      return res.status(401).send({ message: 'Unauthorized access' })
-    }
-    req.user = decoded
-    next()
-  })
-  // next()
-}
+
 const cookieOption = {
   httpOnly: true,
   sameSite: process.env.NODE_ENV === "production" ? "none" : "strict",
@@ -50,27 +37,57 @@ const cookieOption = {
 async function run() {
   try {
     await client.connect();
-
+    // Collections
     const userCollection = client.db("PicoWorkersDB").collection('users')
     const reviewCollection = client.db("PicoWorkersDB").collection('Reviews')
     const taskCollection = client.db("PicoWorkersDB").collection('Tasks')
     const submissionCollection = client.db("PicoWorkersDB").collection('Submission')
-    const PaymentCollection = client.db("PicoWorkersDB").collection('Payment')
+    const paymentCollection = client.db("PicoWorkersDB").collection('Payment')
+    const withdrawCollection = client.db("PicoWorkersDB").collection('Withdraw')
+    const notificationCollection = client.db("PicoWorkersDB").collection('notificationCollection');
     // auth related api 
     app.post('/jwt', async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' })
       res
-        .cookie('token', token, cookieOption)
-        .send({ success: true });
+        // .cookie('token', token, cookieOption)
+        .send({ token });
     })
-    app.post('/logout', (req, res) => {
-      const user = req.body
-      res.clearCookie('token', { ...cookieOption, maxAge: 0 })
-        .send({ success: true })
-    })
+    const verifyToken = (req, res, next) => {
+      console.log('inside verify token', req.headers.authorization);
+      if (!req.headers.authorization) {
+        return res.status(401).send({ message: 'unauthorized access' });
+      }
+      const token = req.headers.authorization.split(' ')[1];
+      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+        if (err) {
+          return res.status(401).send({ message: 'unauthorized access' })
+        }
+        req.decoded = decoded;
+      })
+      next();
+    }
+    // app.post('/logout', (req, res) => {
+    //   const user = req.body
+    //   res.clearCookie('token', { ...cookieOption, maxAge: 0 })
+    //     .send({ success: true })
+    // })
 
     // User Related Operation
+    app.get('/users/admin/:email', async (req, res) => {
+      const email = req.params.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: 'forbidden access' })
+      }
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      let admin = false;
+      if (user) {
+        admin = user?.role === 'admin';
+      }
+      res.send({ admin });
+    })
+
     app.post('/users', async (req, res) => {
       const user = req.body
       const query = { email: user.email }
@@ -82,7 +99,7 @@ async function run() {
       const result = await userCollection.insertOne(user)
       res.send(result)
     })
-    app.get('/users', async (req, res) => {
+    app.get('/users' , verifyToken , async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result)
     })
@@ -119,7 +136,7 @@ async function run() {
       const { coins } = req.params;
       const userInfo = req.body;
       const Id = userInfo.userId
-      const userId = {_id: new ObjectId(Id)}
+      const userId = { _id: new ObjectId(Id) }
       const payment_method = userInfo.payment_method
       const paymentInfo = {
         coins,
@@ -132,13 +149,34 @@ async function run() {
         const updatedCoin = user.coin + parseInt(coins)
         await userCollection.updateOne({ email: user.email }, { $set: { coin: updatedCoin } });
       }
-      const result = await PaymentCollection.insertOne(paymentInfo);
+      const result = await paymentCollection.insertOne(paymentInfo);
       res.send(result);
     });
-    app.get('/payment' , async(req ,res)=>{
-      const result = await PaymentCollection.find().toArray();
+    app.get('/payment', async (req, res) => {
+      const result = await paymentCollection.find().toArray();
       res.send(result)
     })
+    app.post('/withdrawals', async (req, res) => {
+      const paymentInfo = req.body
+      const result = await withdrawCollection.insertOne(paymentInfo)
+      res.send(result)
+    })
+    app.get('/withdrawals', async (req, res) => {
+      const result = await withdrawCollection.find().toArray()
+      res.send(result)
+    })
+    app.delete('/withdrawals/:id', async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const deleteInfo = req.body
+      const user = await userCollection.findOne({ email: deleteInfo.userEmail })
+      const updatedCoin = user.coin - parseInt(deleteInfo.withdrawCoin)
+      await userCollection.updateOne({ email: deleteInfo.userEmail }, { $set: { coin: updatedCoin } });
+      if (user) {
+        const result = await withdrawCollection.deleteOne(query);
+        res.send(result)
+      }
+    });
     // Data related api
     // review related api
     app.get('/reviews', async (req, res) => {
@@ -162,19 +200,24 @@ async function run() {
       res.send(result);
     });
     app.get('/submission', async (req, res) => {
+      const size = parseInt(req.query.size)
+      const page = parseInt(req.query.page)
       let query = { status: 'pending' };
       if (req.query?.email) {
         query = { worker_email: req.query.email }
-        // console.log(query);
       }
-      const result = await submissionCollection.find(query).toArray()
-      // console.log(result);
+      const result = await submissionCollection.find(query).skip(page * size).limit(size).toArray()
       res.send(result)
+    })
+    app.get('/submissionCount', async (req, res) => {
+      const count = await submissionCollection.estimatedDocumentCount()
+      res.send({ count })
     })
     app.get('/approvedSubmission', async (req, res) => {
       let query = { status: 'approved' };
       if (req.query?.email) {
-        query.worker_email = req.query.email
+        worker_email = req.query.email
+        const user  = userCollection.findOne(worker_email)
       }
       // console.log(query);
       const result = await submissionCollection.find(query).toArray()
@@ -186,14 +229,16 @@ async function run() {
       const filter = { _id: new ObjectId(id) };
       const updatedSubmission = req.body
       const user = await userCollection.findOne({ email: updatedSubmission.worker_email })
+      const task = await taskCollection.findOne(filter)
+      const newQuantity = parseInt(task.task_quantity) - 1
       const newCoinBalance = user.coin + parseInt(updatedSubmission.payable_amount)
       await userCollection.updateOne({ email: updatedSubmission.worker_email }, { $set: { coin: newCoinBalance } });
+      await taskCollection.updateOne(filter, { $set: { task_quantity: newQuantity } });
       const newSubmission = {
         $set: {
           status: 'approved'
         }
       }
-      console.log(filter, updatedSubmission, user, updatedSubmission.worker_email, newCoinBalance, newSubmission);
       const result = await submissionCollection.updateOne(filter, newSubmission);
       res.send(result);
     });
