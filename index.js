@@ -7,6 +7,7 @@ require('dotenv').config()
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port = process.env.PORT || 5000;
 
+//Must remove "/" from your production URL
 app.use(
   cors({
     origin: [
