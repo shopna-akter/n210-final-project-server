@@ -7,10 +7,15 @@ require('dotenv').config()
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port = process.env.PORT || 5000;
 
-app.use(cors({
-  origin: 'http://localhost:5173',
-  credentials: true,
-}));
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://n210ph-final.web.app",
+      "https://n210ph-final.firebaseapp.com",
+    ]
+  })
+);
 app.use(express.json())
 app.use(cookieparser())
 
@@ -36,7 +41,7 @@ const cookieOption = {
 }
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     // Collections
     const userCollection = client.db("PicoWorkersDB").collection('users')
     const reviewCollection = client.db("PicoWorkersDB").collection('Reviews')
@@ -45,47 +50,6 @@ async function run() {
     const paymentCollection = client.db("PicoWorkersDB").collection('Payment')
     const withdrawCollection = client.db("PicoWorkersDB").collection('Withdraw')
     const notificationCollection = client.db("PicoWorkersDB").collection('notificationCollection');
-    // auth related api 
-    app.post('/jwt', async (req, res) => {
-      const user = req.body;
-      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, { expiresIn: '1h' })
-      res
-        // .cookie('token', token, cookieOption)
-        .send({ token });
-    })
-    const verifyToken = (req, res, next) => {
-      if (!req.headers.authorization) {
-        return res.status(401).send({ message: 'unauthorized access' });
-      }
-      const token = req.headers.authorization.split(' ')[1];
-      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
-        if (err) {
-          return res.status(401).send({ message: 'unauthorized access' })
-        }
-        req.decoded = decoded;
-      })
-      next();
-    }
-    // app.post('/logout', (req, res) => {
-    //   const user = req.body
-    //   res.clearCookie('token', { ...cookieOption, maxAge: 0 })
-    //     .send({ success: true })
-    // })
-
-    // User Related Operation
-    // app.get('/users/admin/:email', async (req, res) => {
-    //   const email = req.params.email;
-    //   if (email !== req.decoded.email) {
-    //     return res.status(403).send({ message: 'forbidden access' })
-    //   }
-    //   const query = { email: email };
-    //   const user = await userCollection.findOne(query);
-    //   let admin = false;
-    //   if (user) {
-    //     admin = user?.role === 'admin';
-    //   }
-    //   res.send({ admin });
-    // })
 
     app.post('/users', async (req, res) => {
       const user = req.body
@@ -98,7 +62,7 @@ async function run() {
       const result = await userCollection.insertOne(user)
       res.send(result)
     })
-    app.get('/users', verifyToken, async (req, res) => {
+    app.get('/users', async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result)
     })
@@ -234,30 +198,30 @@ async function run() {
       const updatedSubmission = req.body;
       console.log(updatedSubmission.taskId);
       const taskFilter = { _id: new ObjectId(updatedSubmission.taskId) };
-  
+
       const user = await userCollection.findOne({ email: updatedSubmission.worker_email });
       const task = await taskCollection.findOne(taskFilter);
-      console.log(task, updatedSubmission , taskFilter);
-  
+      console.log(task, updatedSubmission, taskFilter);
+
       const newQuantity = parseInt(task.task_quantity) - 1;
       const newCoinBalance = user.coin + parseInt(updatedSubmission.payable_amount);
-  
+
       await userCollection.updateOne({ email: updatedSubmission.worker_email }, { $set: { coin: newCoinBalance } });
       await taskCollection.updateOne(taskFilter, { $set: { task_quantity: newQuantity } });
-  
+
       const newSubmission = { $set: { status: 'approved' } };
       const result = await submissionCollection.updateOne(filter, newSubmission);
-  
+
       const notification = {
-          message: `You have earned ${updatedSubmission.payable_amount} from ${task.creator_name} for completing ${task.task_title}`,
-          toEmail: updatedSubmission.worker_email,
-          time: new Date()
+        message: `You have earned ${updatedSubmission.payable_amount} from ${task.creator_name} for completing ${task.task_title}`,
+        toEmail: updatedSubmission.worker_email,
+        time: new Date()
       };
-  
+
       await notificationCollection.insertOne(notification);
-  
+
       res.send(result);
-  });
+    });
 
     // Task related api
     app.post('/tasks', async (req, res) => {
@@ -331,8 +295,8 @@ async function run() {
         res.send(result)
       }
     })
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    // await client.db("admin").command({ ping: 1 });
+    // console.log("Pinged your deployment. You successfully connected to MongoDB!");
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
