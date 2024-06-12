@@ -54,7 +54,6 @@ async function run() {
         .send({ token });
     })
     const verifyToken = (req, res, next) => {
-      console.log('inside verify token', req.headers.authorization);
       if (!req.headers.authorization) {
         return res.status(401).send({ message: 'unauthorized access' });
       }
@@ -74,19 +73,19 @@ async function run() {
     // })
 
     // User Related Operation
-    app.get('/users/admin/:email', async (req, res) => {
-      const email = req.params.email;
-      if (email !== req.decoded.email) {
-        return res.status(403).send({ message: 'forbidden access' })
-      }
-      const query = { email: email };
-      const user = await userCollection.findOne(query);
-      let admin = false;
-      if (user) {
-        admin = user?.role === 'admin';
-      }
-      res.send({ admin });
-    })
+    // app.get('/users/admin/:email', async (req, res) => {
+    //   const email = req.params.email;
+    //   if (email !== req.decoded.email) {
+    //     return res.status(403).send({ message: 'forbidden access' })
+    //   }
+    //   const query = { email: email };
+    //   const user = await userCollection.findOne(query);
+    //   let admin = false;
+    //   if (user) {
+    //     admin = user?.role === 'admin';
+    //   }
+    //   res.send({ admin });
+    // })
 
     app.post('/users', async (req, res) => {
       const user = req.body
@@ -99,7 +98,7 @@ async function run() {
       const result = await userCollection.insertOne(user)
       res.send(result)
     })
-    app.get('/users' , verifyToken , async (req, res) => {
+    app.get('/users', verifyToken, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result)
     })
@@ -202,46 +201,64 @@ async function run() {
     app.get('/submission', async (req, res) => {
       const size = parseInt(req.query.size)
       const page = parseInt(req.query.page)
-      let query = { status: 'pending' };
-      if (req.query?.email) {
-        query = { worker_email: req.query.email }
-      }
+      const queryEmail = req.query.email
+      const query = { worker_email: queryEmail }
       const result = await submissionCollection.find(query).skip(page * size).limit(size).toArray()
       res.send(result)
     })
-    app.get('/submissionCount', async (req, res) => {
-      const count = await submissionCollection.estimatedDocumentCount()
-      res.send({ count })
+    app.get('/submissionCount/:email', async (req, res) => {
+      const email = req.params.email;
+      const user = await userCollection.findOne({ email: email })
+      console.log(email, user);
+      const currentUserSubmissions = await submissionCollection.find({ worker_email: email }).toArray();
+      console.log(currentUserSubmissions);
+      const count = currentUserSubmissions.length
+      res.send({ count });
     })
     app.get('/approvedSubmission', async (req, res) => {
       let query = { status: 'approved' };
       if (req.query?.email) {
-        worker_email = req.query.email
-        const user  = userCollection.findOne(worker_email)
+        const worker_email = req.query.email
+        console.log(worker_email);
+        const query = { email: worker_email }
+        const user = await userCollection.findOne(query)
+        const newCompletion = parseInt(user.taskCompletion) + 1
+        await userCollection.updateOne({ email: query }, { $set: { taskCompletion: newCompletion } });
       }
-      // console.log(query);
       const result = await submissionCollection.find(query).toArray()
-      // console.log(result);
       res.send(result)
     })
     app.put('/submission/:id', async (req, res) => {
       const id = req.params.id;
       const filter = { _id: new ObjectId(id) };
-      const updatedSubmission = req.body
-      const user = await userCollection.findOne({ email: updatedSubmission.worker_email })
-      const task = await taskCollection.findOne(filter)
-      const newQuantity = parseInt(task.task_quantity) - 1
-      const newCoinBalance = user.coin + parseInt(updatedSubmission.payable_amount)
+      const updatedSubmission = req.body;
+      console.log(updatedSubmission.taskId);
+      const taskFilter = { _id: new ObjectId(updatedSubmission.taskId) };
+  
+      const user = await userCollection.findOne({ email: updatedSubmission.worker_email });
+      const task = await taskCollection.findOne(taskFilter);
+      console.log(task, updatedSubmission , taskFilter);
+  
+      const newQuantity = parseInt(task.task_quantity) - 1;
+      const newCoinBalance = user.coin + parseInt(updatedSubmission.payable_amount);
+  
       await userCollection.updateOne({ email: updatedSubmission.worker_email }, { $set: { coin: newCoinBalance } });
-      await taskCollection.updateOne(filter, { $set: { task_quantity: newQuantity } });
-      const newSubmission = {
-        $set: {
-          status: 'approved'
-        }
-      }
+      await taskCollection.updateOne(taskFilter, { $set: { task_quantity: newQuantity } });
+  
+      const newSubmission = { $set: { status: 'approved' } };
       const result = await submissionCollection.updateOne(filter, newSubmission);
+  
+      const notification = {
+          message: `You have earned ${updatedSubmission.payable_amount} from ${task.creator_name} for completing ${task.task_title}`,
+          toEmail: updatedSubmission.worker_email,
+          time: new Date()
+      };
+  
+      await notificationCollection.insertOne(notification);
+  
       res.send(result);
-    });
+  });
+
     // Task related api
     app.post('/tasks', async (req, res) => {
       const newTask = req.body
