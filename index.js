@@ -13,7 +13,8 @@ app.use(
       "http://localhost:5173",
       "https://n210ph-final.web.app",
       "https://n210ph-final.firebaseapp.com",
-    ]
+    ],
+    credentials: true
   })
 );
 app.use(express.json())
@@ -222,7 +223,11 @@ async function run() {
 
       res.send(result);
     });
-
+    app.get('/notification/:email' , async(req, res)=>{
+      const email = req.params.email
+      const notifications = await notificationCollection.find({ toEmail: email }).sort({ time: -1 }).toArray();
+      res.send(notifications)
+    })
     // Task related api
     app.post('/tasks', async (req, res) => {
       const newTask = req.body
